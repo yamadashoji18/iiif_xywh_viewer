@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="IIIF Image Viewer using Mirador">
+    <title>IIIF Image Viewer</title>
+    <link rel="stylesheet" href="css/mirador-combined.min.css">
+    <script src="js/mirador.min.js" defer></script>
+    <style>
+        #mirador-viewer {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            right: 0;
+        }
+    </style>
+</head>
+<body>
+    <main id="mirador-viewer"></main>
+    <script>
+        document.addEventListener('DOMContentLoaded', initMirador);
+
+        function initMirador() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const manifestUrl = urlParams.get('manifest');
+            const xywh = urlParams.get('xywh');
+            const canvasIndex = parseInt(urlParams.get('canvas'), 10) || 0;
+
+            if (!manifestUrl) {
+                handleError("No manifest URL provided");
+                return;
+            }
+
+            const miradorConfig = createMiradorConfig(manifestUrl, canvasIndex, xywh);
+            const miradorInstance = Mirador.viewer(miradorConfig);
+
+            if (xywh) {
+                updateViewport(miradorInstance, xywh);
+            }
+
+            monitorMiradorState(miradorInstance);
+        }
+
+        function createMiradorConfig(manifestUrl, canvasIndex, xywh) {
+            const config = {
+                id: 'mirador-viewer',
+                windows: [{
+                    loadedManifest: manifestUrl,
+                    canvasIndex: canvasIndex,
+                    view: 'single'
+                }]
+            };
+
+            if (xywh) {
+                const [x, y, w, h] = xywh.split(':').map(Number);
+                config.windows[0].imageToolsEnabled = true;
+                config.windows[0].xywh = `${x},${y},${w},${h}`;
+            }
+
+            return config;
+        }
+
+        function getCanvasDimensions(miradorInstance, windowId) {
+            const state = miradorInstance.store.getState();
+            const canvasId = state.windows[windowId].canvasId;
+            const manifestId = state.windows[windowId].manifestId;
+            const manifest = state.manifests[manifestId].json;
+
+            // IIIF Presentation API 2.0 (sequences) または 3.0 (items) のどちらでも参照
+            const canvases = manifest.sequences && manifest.sequences[0] && manifest.sequences[0].canvases
+                ? manifest.sequences[0].canvases
+                : manifest.items;
+            const canvas = canvases && canvases.find(c => c['@id'] === canvasId || c.id === canvasId);
+
+            if (!canvas) {
+                console.error('Canvas not found');
+                return null;
+            }
+
+            return {
+                width: canvas.width,
+                height: canvas.height
+            };
+        }
+
+        function updateViewport(miradorInstance, xywh) {
+            const [x, y, w, h] = xywh.split(':').map(Number);
+            setTimeout(() => {
+                const state = miradorInstance.store.getState();
+                const windowId = Object.keys(state.windows)[0];
+
+                const canvasDimensions = getCanvasDimensions(miradorInstance, windowId);
+                if (!canvasDimensions) {
+                    console.error('Failed to get canvas dimensions');
+                     return;
+                }
+
+                if (Math.max(canvasDimensions.width, canvasDimensions.height) * 0.7 > Math.max(w, h)) {
+                    scale = 1 / Math.max(w, h) * 0.7
+                } else {
+                    scale = 1 / Math.max(w, h)
+                }
+
+                miradorInstance.store.dispatch(
+                    Mirador.actions.updateViewport(windowId, {
+                        x: x + w/2,
+                        y: y + h/2,
+                        zoom: scale
+                    })
+                );
+            }, 1000);
+        }
+
+        function monitorMiradorState(miradorInstance) {
+            miradorInstance.store.subscribe(() => {
+                const state = miradorInstance.store.getState();
+            });
+        }
+
+        function handleError(message) {
+            console.error(message);
+            document.getElementById('mirador-viewer').innerHTML = `Error: ${message}`;
+        }
+    </script>
+</body>
+</html>
